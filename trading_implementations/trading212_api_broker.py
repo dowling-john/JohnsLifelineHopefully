@@ -152,9 +152,9 @@ class Trading212APIBroker(BrokerInterface):
         data = self._get("/equity/account/summary", "GET /equity/account/summary")
         return AccountSnapshot(
             currency=data["currency"],
-            cash=data["cash"],
-            invested=data.get("invested", 0.0),
-            total_value=data.get("total", data["cash"]),
+            cash=data["cash"]["availableToTrade"],
+            invested=data["investments"]["totalCost"],
+            total_value=data["totalValue"],
             as_of=datetime.now(timezone.utc),
         )
 

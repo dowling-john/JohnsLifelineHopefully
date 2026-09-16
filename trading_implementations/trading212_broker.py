@@ -27,8 +27,8 @@ side-effect of reordering base classes.
 
 from __future__ import annotations
 
-from trading212_api_broker import Environment, Trading212APIBroker
-from trading212_ui_broker import Trading212UIBroker
+from trading_implementations.trading212_api_broker import Environment, Trading212APIBroker
+from trading_implementations.trading212_ui_broker import Trading212UIBroker
 
 
 class Trading212Broker(Trading212UIBroker, Trading212APIBroker):
