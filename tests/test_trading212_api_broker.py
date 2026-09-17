@@ -205,6 +205,98 @@ class TestCancelAndGetOrder:
         assert result.filled_quantity == 3.0
 
 
+class TestPositionsCache:
+    def _payload(self):
+        return [
+            {
+                "instrument": {"ticker": "AAPL_US_EQ", "currency": "USD", "isin": "x", "name": "Apple"},
+                "quantity": 2.0, "averagePricePaid": 180.0, "currentPrice": 190.0,
+                "quantityAvailableForTrading": 2.0, "quantityInPies": 0.0,
+                "walletImpact": {
+                    "currency": "USD", "currentValue": 380.0, "totalCost": 360.0,
+                    "unrealizedProfitLoss": 20.0, "fxImpact": 0.0,
+                },
+            }
+        ]
+
+    def test_repeated_calls_within_ttl_reuse_cache(self, broker):
+        with patch.object(broker._session, "request", return_value=_mock_response(self._payload())) as req:
+            broker.get_positions()
+            broker.get_positions()
+            broker.get_positions()
+        assert req.call_count == 1
+
+    def test_get_quote_reuses_cached_positions_no_extra_calls(self, broker):
+        """
+        This is exactly the scenario that hit a real 429 in practice:
+        get_positions() once, then get_quote() per held ticker. With the
+        cache, only the first call should hit the API.
+        """
+        with patch.object(broker._session, "request", return_value=_mock_response(self._payload())) as req:
+            broker.get_positions()
+            broker.get_quote("AAPL_US_EQ")
+            broker.get_quote("AAPL_US_EQ")
+        assert req.call_count == 1
+
+    def test_force_refresh_bypasses_cache(self, broker):
+        with patch.object(broker._session, "request", return_value=_mock_response(self._payload())) as req:
+            broker.get_positions()
+            broker.get_positions(force_refresh=True)
+        assert req.call_count == 2
+
+    def test_cache_expires_after_ttl(self, broker, monkeypatch):
+        broker._positions_cache_ttl = 0.01
+        with patch.object(broker._session, "request", return_value=_mock_response(self._payload())) as req:
+            broker.get_positions()
+            import time as time_module
+            time_module.sleep(0.02)
+            broker.get_positions()
+        assert req.call_count == 2
+
+
+class TestRetryOn429:
+    def test_retries_and_succeeds_after_429(self, broker, monkeypatch):
+        monkeypatch.setattr("time.sleep", lambda *_: None)  # don't actually wait in tests
+        rate_limited = _mock_response({}, status_ok=True)
+        rate_limited.status_code = 429
+        rate_limited.headers = {}
+        success = _mock_response({"currency": "GBP", "cash": {"availableToTrade": 1.0},
+                                   "investments": {"totalCost": 0.0}, "totalValue": 1.0})
+        success.status_code = 200
+
+        with patch.object(broker._session, "request", side_effect=[rate_limited, success]) as req:
+            account = broker.get_account()
+
+        assert req.call_count == 2
+        assert account.currency == "GBP"
+
+    def test_respects_retry_after_header(self, broker, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr("time.sleep", lambda seconds: sleeps.append(seconds))
+        rate_limited = _mock_response({}, status_ok=True)
+        rate_limited.status_code = 429
+        rate_limited.headers = {"Retry-After": "5"}
+        success = _mock_response({"currency": "GBP", "cash": {"availableToTrade": 1.0},
+                                   "investments": {"totalCost": 0.0}, "totalValue": 1.0})
+        success.status_code = 200
+
+        with patch.object(broker._session, "request", side_effect=[rate_limited, success]):
+            broker.get_account()
+
+        assert 5.0 in sleeps
+
+    def test_gives_up_after_max_retries(self, broker, monkeypatch):
+        monkeypatch.setattr("time.sleep", lambda *_: None)
+        rate_limited = _mock_response({}, status_ok=True)
+        rate_limited.status_code = 429
+        rate_limited.headers = {}
+        rate_limited.raise_for_status.side_effect = __import__("requests").exceptions.HTTPError("429")
+
+        with patch.object(broker._session, "request", return_value=rate_limited):
+            with pytest.raises(Exception):
+                broker.get_account()
+
+
 @pytest.mark.parametrize(
     "t212_status,expected",
     [

@@ -17,6 +17,11 @@ Known gaps in the underlying API (see the interface spec doc for detail):
 3. Order endpoints are not idempotent in this beta — place_order() guards
    against accidental duplicate submission using client_order_id, but
    only within this process's lifetime (in-memory dedupe, not persisted).
+4. get_quote() calls get_positions() under the hood, so calling it in a
+   loop (once per held ticker) multiplies /equity/positions calls. A short
+   TTL cache on get_positions() absorbs this — see positions_cache_ttl.
+   Confirmed against the real demo API: without this, a two-position
+   portfolio's read-only checks alone triggered a 429.
 
 Requires the `requests` package (not yet in pyproject.toml — add it
 before this module is used: `poetry add requests`).
@@ -83,11 +88,21 @@ _STATUS_MAP: dict[str, OrderStatus] = {
 }
 
 
+_MAX_RETRIES_ON_429 = 3
+_DEFAULT_BACKOFF_SECONDS = 2.0  # used when the response has no Retry-After header
+
+
 @dataclass
 class _RateLimiter:
     """Minimal per-endpoint-key rate limiter: sleeps just enough to respect
     the documented minimum interval. Not a full token bucket — good enough
-    for a single-process trading loop, not for concurrent callers."""
+    for a single-process trading loop, not for concurrent callers.
+
+    This is a best-effort guard, not a guarantee: the real demo environment
+    has rate-limited us even while respecting these documented intervals
+    (see module docstring, point 4) — callers still need 429 handling on
+    top of this, not instead of it.
+    """
 
     _last_call: dict[str, float] = None
 
@@ -106,7 +121,13 @@ class _RateLimiter:
 
 
 class Trading212APIBroker(BrokerInterface):
-    def __init__(self, api_key: str, api_secret: str, environment: Environment):
+    def __init__(
+        self,
+        api_key: str,
+        api_secret: str,
+        environment: Environment,
+        positions_cache_ttl: float = 2.0,
+    ):
         self._environment = environment
         self._session = requests.Session()
         credentials = base64.b64encode(f"{api_key}:{api_secret}".encode("utf-8")).decode("utf-8")
@@ -117,25 +138,38 @@ class Trading212APIBroker(BrokerInterface):
         # real deployment should persist this (e.g. to disk or a DB) before
         # going live, so a crash-and-restart mid-order can't double-submit.
         self._submitted_orders: dict[str, OrderResult] = {}
+        # Short-TTL cache for get_positions(), since get_quote() calls it
+        # internally — without this, pricing N held tickers means N+1 calls
+        # to /equity/positions in quick succession. See module docstring,
+        # point 4 — this was observed triggering a real 429 in practice.
+        self._positions_cache_ttl = positions_cache_ttl
+        self._positions_cache: tuple[float, list[Position]] | None = None
 
     # -- internal helpers ----------------------------------------------
 
+    def _request(self, method: str, path: str, rate_key: str, **kwargs: Any) -> requests.Response:
+        url = f"{self._environment.value}{path}"
+        for attempt in range(_MAX_RETRIES_ON_429 + 1):
+            self._rate_limiter.wait(rate_key)
+            response = self._session.request(method, url, **kwargs)
+            if response.status_code != 429:
+                response.raise_for_status()
+                return response
+            if attempt == _MAX_RETRIES_ON_429:
+                response.raise_for_status()  # give up — raises HTTPError
+            retry_after = response.headers.get("Retry-After")
+            delay = float(retry_after) if retry_after else _DEFAULT_BACKOFF_SECONDS * (attempt + 1)
+            time.sleep(delay)
+        raise AssertionError("unreachable")  # loop always returns or raises
+
     def _get(self, path: str, rate_key: str, params: dict[str, Any] | None = None) -> Any:
-        self._rate_limiter.wait(rate_key)
-        response = self._session.get(f"{self._environment.value}{path}", params=params)
-        response.raise_for_status()
-        return response.json()
+        return self._request("GET", path, rate_key, params=params).json()
 
     def _post(self, path: str, rate_key: str, payload: dict[str, Any]) -> Any:
-        self._rate_limiter.wait(rate_key)
-        response = self._session.post(f"{self._environment.value}{path}", json=payload)
-        response.raise_for_status()
-        return response.json()
+        return self._request("POST", path, rate_key, json=payload).json()
 
     def _delete(self, path: str, rate_key: str) -> None:
-        self._rate_limiter.wait(rate_key)
-        response = self._session.delete(f"{self._environment.value}{path}")
-        response.raise_for_status()
+        self._request("DELETE", path, rate_key)
 
     @staticmethod
     def _to_order_result(data: dict[str, Any]) -> OrderResult:
@@ -158,9 +192,21 @@ class Trading212APIBroker(BrokerInterface):
             as_of=datetime.now(timezone.utc),
         )
 
-    def get_positions(self) -> list[Position]:
+    def get_positions(self, force_refresh: bool = False) -> list[Position]:
+        """
+        Cached for `positions_cache_ttl` seconds (default 2s) — repeated
+        calls within that window (e.g. from get_quote() in a loop) reuse
+        the cached list instead of hitting the API again. Pass
+        force_refresh=True when you specifically need the latest state
+        (e.g. right after placing an order).
+        """
+        if not force_refresh and self._positions_cache is not None:
+            cached_at, cached_positions = self._positions_cache
+            if time.monotonic() - cached_at < self._positions_cache_ttl:
+                return cached_positions
+
         data = self._get("/equity/positions", "GET /equity/positions")
-        return [
+        positions = [
             Position(
                 ticker=item["instrument"]["ticker"],
                 quantity=item["quantity"],
@@ -171,6 +217,8 @@ class Trading212APIBroker(BrokerInterface):
             )
             for item in data
         ]
+        self._positions_cache = (time.monotonic(), positions)
+        return positions
 
     def get_quote(self, ticker: str) -> Quote:
         """
