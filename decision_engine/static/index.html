@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Signal Model — Live Sentiment</title>
+<style>
+  body {
+    background: #0f1115; color: #e6e6e6; font-family: -apple-system, system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center; padding: 2rem;
+  }
+  #ticker { font-size: 1.2rem; color: #9aa4b2; margin-bottom: 0.5rem; }
+  #sentiment-value { font-size: 4rem; font-weight: 700; transition: color 0.15s ease; }
+  #confidence { font-size: 1rem; color: #9aa4b2; margin-top: 0.25rem; }
+  #bar-track { width: 300px; height: 16px; background: #1c1f26; border-radius: 8px; margin-top: 1.5rem; overflow: hidden; }
+  #bar-fill { height: 100%; width: 50%; background: #6b7280; transition: width 0.1s linear, background 0.15s ease; }
+  #status { margin-top: 2rem; font-size: 0.85rem; color: #555b66; }
+  #log { margin-top: 1rem; font-size: 0.75rem; color: #444; max-width: 500px; text-align: center; }
+</style>
+</head>
+<body>
+  <div id="ticker">—</div>
+  <div id="sentiment-value">0.00</div>
+  <div id="confidence">confidence: —</div>
+  <div id="bar-track"><div id="bar-fill"></div></div>
+  <div id="status">connecting…</div>
+  <div id="log"></div>
+
+<script>
+  const tickerEl = document.getElementById("ticker");
+  const valueEl = document.getElementById("sentiment-value");
+  const confidenceEl = document.getElementById("confidence");
+  const barFillEl = document.getElementById("bar-fill");
+  const statusEl = document.getElementById("status");
+
+  function colourFor(sentiment) {
+    if (sentiment > 0.15) return "#3ddc84";   // bullish, green
+    if (sentiment < -0.15) return "#ff5c5c";  // bearish, red
+    return "#9aa4b2";                          // neutral, grey
+  }
+
+  function connect() {
+    const ws = new WebSocket(`ws://${location.host}/ws`);
+
+    ws.onopen = () => { statusEl.textContent = "connected"; };
+    ws.onclose = () => {
+      statusEl.textContent = "disconnected — retrying in 2s";
+      setTimeout(connect, 2000);
+    };
+    ws.onerror = () => { ws.close(); };
+
+    ws.onmessage = (msg) => {
+      const event = JSON.parse(msg.data);
+      if (event.event_type !== "sentiment") return;
+
+      tickerEl.textContent = `${event.ticker} — ${event.source}`;
+      valueEl.textContent = event.sentiment.toFixed(2);
+      valueEl.style.color = colourFor(event.sentiment);
+      confidenceEl.textContent = `confidence: ${(event.confidence * 100).toFixed(0)}%`;
+
+      const pct = ((event.sentiment + 1) / 2) * 100; // map [-1,1] -> [0,100]
+      barFillEl.style.width = `${pct}%`;
+      barFillEl.style.background = colourFor(event.sentiment);
+    };
+  }
+
+  connect();
+</script>
+</body>
+</html>
