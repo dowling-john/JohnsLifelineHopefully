@@ -53,6 +53,27 @@ class SentimentEvent(Event):
             raise ValueError(f"confidence must be in [0, 1], got {self.confidence}")
 
 
+@dataclass(frozen=True)
+class CandleEvent(Event):
+    """
+    Published for every candle a feed sees (CandleFeed/LiveCandleFeed),
+    regardless of whether the model's window is full yet — unlike
+    SentimentEvent, which only appears once there's enough history for a
+    prediction. This is what lets a UI show current price / a chart
+    immediately instead of waiting on the window to warm up.
+
+    `timestamp` is the candle's own bar time (from the source data), kept
+    distinct from the inherited `as_of` (when this event was published).
+    """
+    ticker: str = ""
+    open: float = 0.0
+    high: float = 0.0
+    low: float = 0.0
+    close: float = 0.0
+    volume: float = 0.0
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
 Subscriber = Callable[[Event], None]
 
 

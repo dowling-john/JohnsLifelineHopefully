@@ -9,6 +9,7 @@
     display: flex; flex-direction: column; align-items: center; padding: 2rem;
   }
   #ticker { font-size: 1.2rem; color: #9aa4b2; margin-bottom: 0.5rem; }
+  #mode { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 0.75rem; }
   #sentiment-value { font-size: 4rem; font-weight: 700; transition: color 0.15s ease; }
   #confidence { font-size: 1rem; color: #9aa4b2; margin-top: 0.25rem; }
   #bar-track { width: 300px; height: 16px; background: #1c1f26; border-radius: 8px; margin-top: 1.5rem; overflow: hidden; }
@@ -19,6 +20,7 @@
 </head>
 <body>
   <div id="ticker">—</div>
+  <div id="mode"></div>
   <div id="sentiment-value">0.00</div>
   <div id="confidence">confidence: —</div>
   <div id="bar-track"><div id="bar-fill"></div></div>
@@ -27,6 +29,7 @@
 
 <script>
   const tickerEl = document.getElementById("ticker");
+  const modeEl = document.getElementById("mode");
   const valueEl = document.getElementById("sentiment-value");
   const confidenceEl = document.getElementById("confidence");
   const barFillEl = document.getElementById("bar-fill");
@@ -53,6 +56,8 @@
       if (event.event_type !== "sentiment") return;
 
       tickerEl.textContent = `${event.ticker} — ${event.source}`;
+      modeEl.textContent = event.is_replay ? "REPLAY (historical)" : "LIVE";
+      modeEl.style.color = event.is_replay ? "#f5a623" : "#3ddc84";
       valueEl.textContent = event.sentiment.toFixed(2);
       valueEl.style.color = colourFor(event.sentiment);
       confidenceEl.textContent = `confidence: ${(event.confidence * 100).toFixed(0)}%`;

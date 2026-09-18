@@ -1,15 +1,17 @@
 """
-decision_engine/signals/momentum_signal.py
+decision_engine/signals/squeeze_signal.py
 
-The first signal model — deliberately small and simple, since the goal
-right now is proving the plumbing (event bus -> UI) works end-to-end,
-not squeezing out predictive power.
+The volatility-regime indicator: is price coiling into an unusually tight
+range relative to its own recent history — the kind of compression that
+classically precedes a breakout? A different dimension entirely from
+momentum/flag/RSI (which all read direction or shape off price) — this
+reads volatility itself. Same tiny network shape as MomentumSignalModel;
+see decision_engine/training/squeeze_data_set.py for exactly how the
+label is computed, and train_squeeze.py for training.
 
-Weights are randomly initialised UNLESS a weights_path is given (or
-load_weights() is called after construction). See
-decision_engine/training/train_momentum.py for how to actually train
-this — training predicts the next candle's return from the window, the
-simplest form of a momentum label.
+Window 40, split 25% recent / 75% history baseline (see
+squeeze_data_set.py) — needs enough history to have a meaningful
+volatility baseline to compress against.
 """
 
 from __future__ import annotations
@@ -23,10 +25,10 @@ from decision_engine.events import SentimentEvent
 from decision_engine.signals.base import CandleWindow, SignalModel, normalise_window
 
 
-class MomentumSignalModel(SignalModel):
-    name = "momentum_v0"
+class SqueezeSignalModel(SignalModel):
+    name = "squeeze_v0"
 
-    def __init__(self, window_size: int = 30, seed: int = 42, weights_path: str | Path | None = None):
+    def __init__(self, window_size: int = 40, seed: int = 42, weights_path: str | Path | None = None):
         self._window_size = window_size
         tf.random.set_seed(seed)
 
@@ -58,7 +60,7 @@ class MomentumSignalModel(SignalModel):
     def keras_model(self) -> tf.keras.Model:
         """The underlying Keras model, for training. Signal model consumers
         (CandleFeed, etc.) should use predict() instead — this is for
-        train_momentum.py."""
+        train_squeeze.py."""
         return self._model
 
     def predict(self, ticker: str, window: CandleWindow) -> SentimentEvent:

@@ -1,0 +1,15 @@
+/* Ported 1:1 from the original decision_engine/static/index.html palette. */
+:root {
+  --color-bg: #0f1115;
+  --color-text: #e6e6e6;
+  --color-text-muted: #9aa4b2;
+  --color-text-dim: #555b66;
+  --color-card-bg: #161920;
+  --color-card-border: #232733;
+  --color-bullish: #3ddc84;
+  --color-bearish: #ff5c5c;
+  --color-neutral: #9aa4b2;
+  --color-replay: #f5a623;
+  --color-bar-track: #1c1f26;
+  --font-sans: -apple-system, system-ui, sans-serif;
+}

@@ -1,15 +1,19 @@
 """
-decision_engine/signals/momentum_signal.py
+decision_engine/signals/support_resistance_signal.py
 
-The first signal model — deliberately small and simple, since the goal
-right now is proving the plumbing (event bus -> UI) works end-to-end,
-not squeezing out predictive power.
+The market-structure indicator: is price testing a level it established
+earlier in the window (the extremes of a "formation" segment), and is it
+breaking through or being rejected? Unlike momentum/flag/RSI/squeeze/
+divergence (all readings of a trend or pattern shape over the whole
+window), this is about a specific price level. Same tiny network shape
+as MomentumSignalModel; see
+decision_engine/training/support_resistance_data_set.py for exactly how
+the label is computed, and train_support_resistance.py for training.
 
-Weights are randomly initialised UNLESS a weights_path is given (or
-load_weights() is called after construction). See
-decision_engine/training/train_momentum.py for how to actually train
-this — training predicts the next candle's return from the window, the
-simplest form of a momentum label.
+Window 40, split 80% formation / 20% test (see
+support_resistance_data_set.py) — needs a decent formation period for a
+level to be meaningful, per standard S/R theory (a level tested more
+often during formation is treated as more real).
 """
 
 from __future__ import annotations
@@ -23,10 +27,10 @@ from decision_engine.events import SentimentEvent
 from decision_engine.signals.base import CandleWindow, SignalModel, normalise_window
 
 
-class MomentumSignalModel(SignalModel):
-    name = "momentum_v0"
+class SupportResistanceSignalModel(SignalModel):
+    name = "support_resistance_v0"
 
-    def __init__(self, window_size: int = 30, seed: int = 42, weights_path: str | Path | None = None):
+    def __init__(self, window_size: int = 40, seed: int = 42, weights_path: str | Path | None = None):
         self._window_size = window_size
         tf.random.set_seed(seed)
 
@@ -58,7 +62,7 @@ class MomentumSignalModel(SignalModel):
     def keras_model(self) -> tf.keras.Model:
         """The underlying Keras model, for training. Signal model consumers
         (CandleFeed, etc.) should use predict() instead — this is for
-        train_momentum.py."""
+        train_support_resistance.py."""
         return self._model
 
     def predict(self, ticker: str, window: CandleWindow) -> SentimentEvent:

@@ -1,15 +1,13 @@
 """
-decision_engine/signals/momentum_signal.py
+decision_engine/signals/divergence_signal.py
 
-The first signal model — deliberately small and simple, since the goal
-right now is proving the plumbing (event bus -> UI) works end-to-end,
-not squeezing out predictive power.
-
-Weights are randomly initialised UNLESS a weights_path is given (or
-load_weights() is called after construction). See
-decision_engine/training/train_momentum.py for how to actually train
-this — training predicts the next candle's return from the window, the
-simplest form of a momentum label.
+The volume-driven indicator: does the window's volume trend confirm or
+contradict its price trend? A rally fading on declining volume, or a
+decline being bought into on rising volume, both suggest the price trend
+is unconfirmed and due to turn. Same tiny network shape as
+MomentumSignalModel; see
+decision_engine/training/divergence_data_set.py for exactly how the
+label is computed, and train_divergence.py for training.
 """
 
 from __future__ import annotations
@@ -23,8 +21,8 @@ from decision_engine.events import SentimentEvent
 from decision_engine.signals.base import CandleWindow, SignalModel, normalise_window
 
 
-class MomentumSignalModel(SignalModel):
-    name = "momentum_v0"
+class DivergenceSignalModel(SignalModel):
+    name = "divergence_v0"
 
     def __init__(self, window_size: int = 30, seed: int = 42, weights_path: str | Path | None = None):
         self._window_size = window_size
@@ -58,7 +56,7 @@ class MomentumSignalModel(SignalModel):
     def keras_model(self) -> tf.keras.Model:
         """The underlying Keras model, for training. Signal model consumers
         (CandleFeed, etc.) should use predict() instead — this is for
-        train_momentum.py."""
+        train_divergence.py."""
         return self._model
 
     def predict(self, ticker: str, window: CandleWindow) -> SentimentEvent:

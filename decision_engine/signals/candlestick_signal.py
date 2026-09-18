@@ -1,15 +1,17 @@
 """
-decision_engine/signals/momentum_signal.py
+decision_engine/signals/candlestick_signal.py
 
-The first signal model — deliberately small and simple, since the goal
-right now is proving the plumbing (event bus -> UI) works end-to-end,
-not squeezing out predictive power.
+The short-horizon price-action indicator: does the window's last candle
+look like a rejection of the move that preceded it? Structurally the
+closest relative of FlagSignalModel (context + a reaction to it), just on
+a single final candle rather than a multi-candle consolidation. Same
+tiny network shape as MomentumSignalModel; see
+decision_engine/training/candlestick_data_set.py for exactly how the
+label is computed, and train_candlestick.py for training.
 
-Weights are randomly initialised UNLESS a weights_path is given (or
-load_weights() is called after construction). See
-decision_engine/training/train_momentum.py for how to actually train
-this — training predicts the next candle's return from the window, the
-simplest form of a momentum label.
+Shortest window in this package (18) — candlestick patterns are
+inherently short-horizon; this only needs enough prior candles to judge
+whether there was a real move to reject.
 """
 
 from __future__ import annotations
@@ -23,10 +25,10 @@ from decision_engine.events import SentimentEvent
 from decision_engine.signals.base import CandleWindow, SignalModel, normalise_window
 
 
-class MomentumSignalModel(SignalModel):
-    name = "momentum_v0"
+class CandlestickSignalModel(SignalModel):
+    name = "candlestick_v0"
 
-    def __init__(self, window_size: int = 30, seed: int = 42, weights_path: str | Path | None = None):
+    def __init__(self, window_size: int = 18, seed: int = 42, weights_path: str | Path | None = None):
         self._window_size = window_size
         tf.random.set_seed(seed)
 
@@ -58,7 +60,7 @@ class MomentumSignalModel(SignalModel):
     def keras_model(self) -> tf.keras.Model:
         """The underlying Keras model, for training. Signal model consumers
         (CandleFeed, etc.) should use predict() instead — this is for
-        train_momentum.py."""
+        train_candlestick.py."""
         return self._model
 
     def predict(self, ticker: str, window: CandleWindow) -> SentimentEvent:

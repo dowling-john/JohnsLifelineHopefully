@@ -1,15 +1,15 @@
 """
-decision_engine/signals/momentum_signal.py
+decision_engine/signals/rsi_signal.py
 
-The first signal model — deliberately small and simple, since the goal
-right now is proving the plumbing (event bus -> UI) works end-to-end,
-not squeezing out predictive power.
+The mean-reversion counterpart to momentum/flag: bets on price snapping
+back from an overbought/oversold extreme rather than continuing. Same
+tiny network shape as MomentumSignalModel — what differs is the label
+it's trained on. See decision_engine/training/rsi_data_set.py for exactly
+how that label is computed, and train_rsi.py for training.
 
-Weights are randomly initialised UNLESS a weights_path is given (or
-load_weights() is called after construction). See
-decision_engine/training/train_momentum.py for how to actually train
-this — training predicts the next candle's return from the window, the
-simplest form of a momentum label.
+Shorter window than momentum (20 vs 30) — classic RSI is normally read
+over ~14 candles; this needs only enough history for a stable gain/loss
+average, not room for a whole trend shape.
 """
 
 from __future__ import annotations
@@ -23,10 +23,10 @@ from decision_engine.events import SentimentEvent
 from decision_engine.signals.base import CandleWindow, SignalModel, normalise_window
 
 
-class MomentumSignalModel(SignalModel):
-    name = "momentum_v0"
+class RsiSignalModel(SignalModel):
+    name = "rsi_v0"
 
-    def __init__(self, window_size: int = 30, seed: int = 42, weights_path: str | Path | None = None):
+    def __init__(self, window_size: int = 20, seed: int = 42, weights_path: str | Path | None = None):
         self._window_size = window_size
         tf.random.set_seed(seed)
 
@@ -58,7 +58,7 @@ class MomentumSignalModel(SignalModel):
     def keras_model(self) -> tf.keras.Model:
         """The underlying Keras model, for training. Signal model consumers
         (CandleFeed, etc.) should use predict() instead — this is for
-        train_momentum.py."""
+        train_rsi.py."""
         return self._model
 
     def predict(self, ticker: str, window: CandleWindow) -> SentimentEvent:
